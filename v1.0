@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>电梯模拟器 · 两层</title>
+<style>
+  :root {
+    --bg:#0a0c10; --panel:#11141b; --border:rgba(255,255,255,0.08);
+    --text:#e8ecf2; --dim:#6b7280; --accent:#4ade80;
+    --accent-glow:rgba(74,222,128,0.4); --up:#60a5fa; --down:#f59e0b;
+  }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  body {
+    background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif;
+    min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;
+  }
+  .app {
+    width:100%; max-width:560px; background:var(--panel);
+    border-radius:18px; border:1px solid var(--border); overflow:hidden;
+    box-shadow:0 30px 80px rgba(0,0,0,0.6);
+  }
+  .header {
+    padding:20px 24px 16px; border-bottom:1px solid var(--border);
+    display:flex; align-items:baseline; justify-content:space-between;
+  }
+  .header h1 { font-size:16px; font-weight:600; }
+  .header .sub {
+    font-size:11px; color:var(--dim);
+    font-family:ui-monospace,monospace; letter-spacing:0.1em; text-transform:uppercase;
+  }
+  .building {
+    display:flex; height:240px; position:relative;
+    background:#07090d; overflow:hidden;
+  }
+  .shaft {
+    width:108px; position:relative;
+    background:linear-gradient(180deg,#0d1118 0%,#060810 100%);
+    border-right:1px solid var(--border); flex-shrink:0;
+  }
+  .shaft::before {
+    content:''; position:absolute; inset:0;
+    background:repeating-linear-gradient(0deg,transparent 0 119px,rgba(255,255,255,0.03) 119px 120px);
+    pointer-events:none;
+  }
+  .car-bg {
+    position:absolute; left:8px; width:92px; height:100px;
+    background:linear-gradient(180deg,#1d232e 0%,#12161e 100%);
+    border:1px solid rgba(255,255,255,0.1); border-radius:6px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,0.06),inset 0 -8px 16px rgba(0,0,0,0.4);
+    z-index:1;
+  }
+  .car-doors {
+    position:absolute; left:8px; width:92px; height:100px;
+    z-index:3; pointer-events:none; overflow:hidden; border-radius:6px;
+  }
+  .car-door {
+    position:absolute; top:0; bottom:0; width:50%;
+    background:linear-gradient(180deg,#38404f 0%,#252b37 100%);
+    will-change:transform;
+  }
+  .car-door.left { left:0; border-right:1px solid rgba(0,0,0,0.5); }
+  .car-door.right { right:0; border-left:1px solid rgba(0,0,0,0.5); }
+  .car-indicator {
+    position:absolute; left:54px; transform:translateX(-50%);
+    font-family:ui-monospace,monospace; font-size:11px; color:var(--accent);
+    text-shadow:0 0 8px var(--accent-glow); z-index:4; letter-spacing:0.1em;
+    pointer-events:none;
+  }
+  .floors { flex:1; display:flex; flex-direction:column; position:relative; }
+  .floor {
+    height:120px; display:flex; align-items:center;
+    padding:0 16px 0 12px; border-bottom:1px solid rgba(255,255,255,0.04);
+    position:relative; transition:background 0.3s; gap:8px;
+  }
+  .floor:last-child { border-bottom:none; }
+  .floor.active { background:rgba(74,222,128,0.05); }
+  .floor.active::before {
+    content:''; position:absolute; left:0; top:50%;
+    transform:translateY(-50%); width:2px; height:60px;
+    background:var(--accent); box-shadow:0 0 12px var(--accent-glow);
+  }
+  .floor-label {
+    font-family:ui-monospace,monospace; font-size:14px;
+    color:var(--dim); letter-spacing:0.05em; flex-shrink:0; width:28px;
+  }
+  .floor.active .floor-label { color:var(--accent); font-weight:600; }
+  .floor-spacer { flex:1; }
+  .floor-calls { display:flex; gap:6px; flex-shrink:0; }
+  .call-btn {
+    width:32px; height:32px; border-radius:50%;
+    border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.02);
+    color:var(--dim); font-size:11px; display:flex; align-items:center;
+    justify-content:center; cursor:pointer; transition:all 0.2s; padding:0;
+  }
+  .call-btn:hover { border-color:rgba(255,255,255,0.25); color:var(--text); }
+  .call-btn.up.active {
+    background:rgba(96,165,250,0.15);
+    border-color:var(--up); color:var(--up);
+    box-shadow:0 0 12px rgba(96,165,250,0.4);
+  }
+  .call-btn.down.active {
+    background:rgba(245,158,11,0.15);
+    border-color:var(--down); color:var(--down);
+    box-shadow:0 0 12px rgba(245,158,11,0.4);
+  }
+  .passenger-layer { position:absolute; inset:0; pointer-events:none; z-index:2; }
+  .person { position:absolute; width:14px; height:21px; will-change:left,top; }
+  .person svg { display:block; }
+  .control-panel {
+    padding:16px 24px; border-top:1px solid var(--border);
+    display:flex; align-items:center; justify-content:space-between;
+    gap:16px; flex-wrap:wrap;
+  }
+  .inner-buttons { display:flex; gap:8px; }
+  .inner-btn {
+    width:38px; height:38px; border-radius:8px;
+    border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.02);
+    color:var(--dim); font-family:ui-monospace,monospace; font-size:13px;
+    cursor:pointer; transition:all 0.2s; padding:0;
+  }
+  .inner-btn:hover { border-color:rgba(255,255,255,0.2); color:var(--text); }
+  .inner-btn.active {
+    background:rgba(74,222,128,0.12);
+    border-color:var(--accent); color:var(--accent);
+    box-shadow:0 0 12px var(--accent-glow);
+  }
+  .door-buttons { display:flex; gap:8px; }
+  .door-btn {
+    padding:9px 15px; border-radius:8px;
+    border:1px solid rgba(255,255,255,0.08); background:rgba(255,255,255,0.02);
+    color:var(--dim); font-size:12px; cursor:pointer; transition:all 0.2s;
+  }
+  .door-btn:hover { border-color:rgba(255,255,255,0.2); color:var(--text); }
+  .status {
+    padding:12px 24px; border-top:1px solid var(--border);
+    display:flex; gap:24px; font-size:11px;
+    font-family:ui-monospace,monospace; color:var(--dim);
+    background:rgba(0,0,0,0.2); flex-wrap:wrap;
+  }
+  .status b { color:var(--text); font-weight:500; }
+  .status .dir-up { color:var(--up); }
+  .status .dir-down { color:var(--down); }
+  .log {
+    padding:12px 24px 16px; border-top:1px solid var(--border);
+    max-height:140px; overflow-y:auto; font-family:ui-monospace,monospace;
+    font-size:10.5px; color:var(--dim); line-height:1.7;
+    background:rgba(0,0,0,0.15);
+  }
+  .log-item { display:flex; gap:10px; }
+  .log-time { color:#3a4050; flex-shrink:0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <h1>电梯模拟器</h1>
+    <div class="sub">Two Floors</div>
+  </div>
+
+  <div class="building">
+    <div class="shaft">
+      <div class="car-bg" id="carBg"></div>
+      <div class="car-indicator" id="carIndicator">1</div>
+    </div>
+    <div class="floors" id="floors">
+      <div class="floor" data-floor="2">
+        <span class="floor-label">2F</span>
+        <div class="floor-spacer"></div>
+        <div class="floor-calls">
+          <button class="call-btn down" data-dir="down" data-floor="2">▼</button>
+        </div>
+      </div>
+      <div class="floor" data-floor="1">
+        <span class="floor-label">1F</span>
+        <div class="floor-spacer"></div>
+        <div class="floor-calls">
+          <button class="call-btn up" data-dir="up" data-floor="1">▲</button>
+        </div>
+      </div>
+    </div>
+    <div class="car-doors" id="carDoors">
+      <div class="car-door left" id="doorL"></div>
+      <div class="car-door right" id="doorR"></div>
+    </div>
+    <div class="passenger-layer" id="passengerLayer"></div>
+  </div>
+
+  <div class="control-panel">
+    <div class="inner-buttons" id="innerButtons">
+      <button class="inner-btn" data-floor="1">1</button>
+      <button class="inner-btn" data-floor="2">2</button>
+    </div>
+    <div class="door-buttons">
+      <button class="door-btn" id="addBtn">＋ 随机乘客</button>
+      <button class="door-btn" id="openBtn">◀▶ 开门</button>
+      <button class="door-btn" id="closeBtn">▶◀ 关门</button>
+    </div>
+  </div>
+
+  <div class="status">
+    <span>楼层 <b id="curFloor">1</b></span>
+    <span>方向 <b id="dirText">—</b></span>
+    <span>门 <b id="doorText">关闭</b></span>
+    <span>状态 <b id="stateText">空闲</b></span>
+    <span>乘客 <b id="paxText">0</b></span>
+  </div>
+  <div class="log" id="log"></div>
+</div>
+
+<script>
+/* ============================================================
+   常量
+   ============================================================ */
+const FLOORS = 2;
+const FLOOR_H = 120;
+const CAR_H = 100;
+const ELEV_SPEED = 1.2;
+const DOOR_SPEED = 2.5;
+const HOLD_TIME = 1.5;
+
+/* ============================================================
+   状态
+   ============================================================ */
+const ele = {
+  pos: 1,
+  dir: 0,
+  door: 0,
+  phase: 'idle',
+  holdTimer: 0,
+  inner: new Set(),
+  up: new Set(),
+  down: new Set(),
+  justLeft: null,
+  onEvent: null,
+};
+
+function emit(t, ...a) { if (ele.onEvent) ele.onEvent(t, ...a); }
+
+function addInner(f) {
+  if (!Number.isInteger(f) || f < 1 || f > FLOORS) return;
+  ele.inner.add(f);
+  emit('inner', f);
+}
+function addCall(f, d) {
+  if (!Number.isInteger(f) || f < 1 || f > FLOORS) return;
+  if (d === 'up') ele.up.add(f); else ele.down.add(f);
+  emit('call', f, d);
+}
+function allRequests() {
+  return [...ele.inner, ...ele.up, ...ele.down];
+}
+
+function shouldStop(f) {
+  if (f === ele.justLeft) return false;
+  if (ele.inner.has(f)) return true;
+  if (ele.up.has(f)) return true;
+  if (ele.down.has(f)) return true;
+  return false;
+}
+
+function openDoor(f) {
+  ele.inner.delete(f);
+  ele.up.delete(f);
+  ele.down.delete(f);
+  if (f === 1 && ele.dir < 0) ele.dir = 1;
+  if (f === FLOORS && ele.dir > 0) ele.dir = -1;
+  ele.phase = 'opening';
+  ele.justLeft = f;
+  emit('open', f);
+}
+
+/* ============================================================
+   物理
+   ============================================================ */
+function updatePhysics(dt) {
+  // 门阶段
+  if (ele.phase === 'opening') {
+    ele.door = Math.min(1, ele.door + DOOR_SPEED * dt);
+    if (ele.door >= 1) { ele.phase = 'open'; ele.holdTimer = HOLD_TIME; }
+    return;
+  }
+  if (ele.phase === 'open') {
+    ele.holdTimer -= dt;
+    if (ele.holdTimer <= 0) ele.phase = 'closing';
+    return;
+  }
+  if (ele.phase === 'closing') {
+    ele.door = Math.max(0, ele.door - DOOR_SPEED * dt);
+    if (ele.door <= 0) {
+      ele.door = 0;
+      ele.phase = 'idle';
+      ele.justLeft = null;
+    }
+    return;
+  }
+
+  // 精确到位才停靠
+  const nearest = Math.round(ele.pos);
+  const dist = Math.abs(ele.pos - nearest);
+  if (dist < 0.001 && shouldStop(nearest)) {
+    ele.pos = nearest;
+    openDoor(nearest);
+    return;
+  }
+
+  // 无请求
+  const all = allRequests();
+  if (all.length === 0) { ele.dir = 0; return; }
+
+  // 选目标：不用 Math.round，用实际位置和请求楼层比
+  let target = null;
+  let bestDist = Infinity;
+  for (const f of all) {
+    const d = Math.abs(ele.pos - f);
+    if (d > 0.001 && d < bestDist) {
+      bestDist = d;
+      target = f;
+    }
+  }
+  if (target === null) return;
+
+  ele.dir = target > ele.pos ? 1 : -1;
+
+  // 移动
+  const diff = target - ele.pos;
+  const step = ELEV_SPEED * dt;
+  if (Math.abs(diff) <= step) {
+    ele.pos = target;
+  } else {
+    ele.pos += Math.sign(diff) * step;
+  }
+}
+
+/* ============================================================
+   DOM
+   ============================================================ */
+const carBg = document.getElementById('carBg');
+const carDoors = document.getElementById('carDoors');
+const carIndicator = document.getElementById('carIndicator');
+const doorL = document.getElementById('doorL');
+const doorR = document.getElementById('doorR');
+const floorsEl = document.getElementById('floors');
+const innerButtons = document.getElementById('innerButtons');
+const logEl = document.getElementById('log');
+const passengerLayer = document.getElementById('passengerLayer');
+
+const curFloorEl = document.getElementById('curFloor');
+const dirTextEl = document.getElementById('dirText');
+const doorTextEl = document.getElementById('doorText');
+const stateTextEl = document.getElementById('stateText');
+const paxTextEl = document.getElementById('paxText');
+
+/* ============================================================
+   坐标
+   ============================================================ */
+const floorFloorY = (f) => (FLOORS + 1 - f) * FLOOR_H;
+const carFloorY = () => (FLOORS + 1 - ele.pos) * FLOOR_H;
+const waitingX = (i) => 190 + i * 18;
+const ridingX = (i, n) => 54 + (i - (n - 1) / 2) * 14;
+
+/* ============================================================
+   乘客
+   ============================================================ */
+let passengers = [];
+let passengerId = 0;
+const COLORS = ['#4ade80','#60a5fa','#f472b6','#fbbf24','#a78bfa','#34d399','#f87171','#38bdf8'];
+
+function personSVG(c) {
+  return `<svg viewBox="0 0 16 24" width="14" height="21" style="display:block">
+    <circle cx="8" cy="5" r="4" fill="${c}"/>
+    <rect x="4" y="10" width="8" height="9" rx="2.5" fill="${c}"/>
+    <rect x="5" y="18.5" width="2.5" height="5" rx="1" fill="${c}"/>
+    <rect x="8.5" y="18.5" width="2.5" height="5" rx="1" fill="${c}"/>
+  </svg>`;
+}
+
+function spawnPassenger(from, to) {
+  if (from === to) return;
+  if (from < 1 || from > FLOORS || to < 1 || to > FLOORS) return;
+  const p = {
+    id: ++passengerId, from, to,
+    state: 'waiting',
+    color: COLORS[passengerId % COLORS.length],
+    x: waitingX(0), y: floorFloorY(from),
+    tx: waitingX(0), ty: floorFloorY(from),
+  };
+  passengers.push(p);
+  addCall(from, from < to ? 'up' : 'down');
+  log(`👤 乘客 #${p.id} · ${from}F → ${to}F`);
+}
+
+function spawnRandomPassenger() {
+  const from = Math.random() < 0.5 ? 1 : 2;
+  const to = from === 1 ? 2 : 1;
+  spawnPassenger(from, to);
+}
+
+/* ============================================================
+   日志
+   ============================================================ */
+let logStart = Date.now();
+function log(msg) {
+  const t = ((Date.now() - logStart) / 1000).toFixed(1) + 's';
+  const div = document.createElement('div');
+  div.className = 'log-item';
+  div.innerHTML = `<span class="log-time">[${t}]</span><span>${msg}</span>`;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+  if (logEl.children.length > 80) logEl.removeChild(logEl.firstChild);
+}
+
+/* ============================================================
+   事件
+   ============================================================ */
+ele.onEvent = (type, ...args) => {
+  if (type === 'inner') log(`轿厢内选 ${args[0]}F`);
+  if (type === 'call')  log(`${args[0]}F 外呼 ${args[1] === 'up' ? '上行' : '下行'}`);
+
+  if (type === 'open') {
+    const floor = args[0];
+    log(`到达 ${floor}F，开门`);
+    const dir = ele.dir;
+
+    for (const p of passengers) {
+      if (p.state === 'riding' && p.to === floor) {
+        p.state = 'exiting';
+        p.tx = waitingX(0);
+        p.ty = floorFloorY(floor);
+        log(`👤 乘客 #${p.id} 走出电梯`);
+      }
+    }
+    for (const p of passengers) {
+      if (p.state !== 'waiting' || p.from !== floor) continue;
+      const pDir = p.to > floor ? 'up' : 'down';
+      if (dir === 0 || (dir > 0 && pDir === 'up') || (dir < 0 && pDir === 'down')) {
+        p.state = 'entering';
+        addInner(p.to);
+        log(`👤 乘客 #${p.id} 进入电梯 → ${p.to}F`);
+      }
+    }
+  }
+
+  if (type === 'close') log('关门');
+};
+
+/* ============================================================
+   乘客更新
+   ============================================================ */
+function updatePassengers(dt) {
+  const riding = passengers.filter(p => p.state === 'riding' || p.state === 'entering');
+  riding.forEach((p, i) => {
+    p.tx = ridingX(i, riding.length);
+    p.ty = carFloorY();
+  });
+
+  const byFloor = {};
+  passengers.filter(p => p.state === 'waiting').forEach(p => {
+    (byFloor[p.from] = byFloor[p.from] || []).push(p);
+  });
+  for (const k in byFloor) {
+    const f = parseInt(k);
+    byFloor[k].forEach((p, i) => {
+      p.tx = waitingX(i);
+      p.ty = floorFloorY(f);
+    });
+  }
+
+  passengers.filter(p => p.state === 'exiting').forEach(p => {
+    p.tx = waitingX(0);
+    p.ty = floorFloorY(p.to);
+  });
+
+  const alpha = 1 - Math.pow(0.001, dt);
+  for (const p of passengers) {
+    p.x += (p.tx - p.x) * alpha;
+    p.y += (p.ty - p.y) * alpha;
+    const dx = p.tx - p.x, dy = p.ty - p.y;
+    if (p.state === 'entering' && Math.hypot(dx, dy) < 1) p.state = 'riding';
+    else if (p.state === 'exiting' && Math.hypot(dx, dy) < 1) p.state = 'done';
+  }
+  passengers = passengers.filter(p => p.state !== 'done');
+}
+
+/* ============================================================
+   乘客渲染
+   ============================================================ */
+const paxEls = new Map();
+function renderPassengers() {
+  for (const p of passengers) {
+    let el = paxEls.get(p.id);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'person';
+      el.innerHTML = personSVG(p.color);
+      passengerLayer.appendChild(el);
+      paxEls.set(p.id, el);
+    }
+    el.style.left = (p.x - 7) + 'px';
+    el.style.top  = (p.y - 21) + 'px';
+  }
+  for (const [id, el] of paxEls) {
+    if (!passengers.find(p => p.id === id)) {
+      el.remove();
+      paxEls.delete(id);
+    }
+  }
+}
+
+/* ============================================================
+   按钮状态
+   ============================================================ */
+function updateCallButtons() {
+  document.querySelectorAll('.call-btn').forEach(btn => {
+    const f = parseInt(btn.dataset.floor);
+    const d = btn.dataset.dir;
+    btn.classList.toggle('active', d === 'up' ? ele.up.has(f) : ele.down.has(f));
+  });
+}
+function updateInnerButtons() {
+  document.querySelectorAll('.inner-btn').forEach(btn => {
+    btn.classList.toggle('active', ele.inner.has(parseInt(btn.dataset.floor)));
+  });
+}
+
+/* ============================================================
+   渲染
+   ============================================================ */
+function render() {
+  const carTop = (FLOORS - ele.pos) * FLOOR_H + (FLOOR_H - CAR_H);
+  carBg.style.top = carTop + 'px';
+  carDoors.style.top = carTop + 'px';
+  carIndicator.style.top = (carTop + 6) + 'px';
+
+  const nearest = Math.round(ele.pos);
+  const isAtFloor = Math.abs(ele.pos - nearest) < 0.001;
+  carIndicator.textContent = isAtFloor ? nearest : ele.pos.toFixed(1);
+
+  const half = ele.door * 50;
+  doorL.style.transform = `translateX(${-half}%)`;
+  doorR.style.transform = `translateX(${half}%)`;
+
+  document.querySelectorAll('.floor').forEach(el => {
+    el.classList.toggle('active', isAtFloor && parseInt(el.dataset.floor) === nearest);
+  });
+
+  curFloorEl.textContent = isAtFloor ? nearest : ele.pos.toFixed(1);
+  if (ele.dir > 0) { dirTextEl.textContent = '▲ 上行'; dirTextEl.className = 'dir-up'; }
+  else if (ele.dir < 0) { dirTextEl.textContent = '▼ 下行'; dirTextEl.className = 'dir-down'; }
+  else { dirTextEl.textContent = '—'; dirTextEl.className = ''; }
+
+  doorTextEl.textContent = ele.door > 0.5 ? '打开' : (ele.door > 0 ? '运动' : '关闭');
+  const stateMap = { idle:'空闲', opening:'开门中', open:'已开门', closing:'关门中' };
+  stateTextEl.textContent = stateMap[ele.phase] || ele.phase;
+
+  paxTextEl.textContent = passengers.filter(p => p.state !== 'done').length;
+
+  renderPassengers();
+  updateCallButtons();
+  updateInnerButtons();
+}
+
+/* ============================================================
+   主循环
+   ============================================================ */
+let lastTime = 0;
+let accumulator = 0;
+const STEP = 1 / 60;
+
+function loop(t) {
+  if (!lastTime) lastTime = t;
+  let frameTime = (t - lastTime) / 1000;
+  lastTime = t;
+  if (frameTime > 0.1) frameTime = 0.1;
+
+  accumulator += frameTime;
+  while (accumulator >= STEP) {
+    updatePhysics(STEP);
+    updatePassengers(STEP);
+    accumulator -= STEP;
+  }
+
+  render();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ============================================================
+   按钮绑定
+   ============================================================ */
+floorsEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.call-btn');
+  if (!btn) return;
+  const f = parseInt(btn.dataset.floor);
+  const to = f === 1 ? 2 : 1;
+  spawnPassenger(f, to);
+});
+
+innerButtons.addEventListener('click', (e) => {
+  const btn = e.target.closest('.inner-btn');
+  if (!btn) return;
+  addInner(parseInt(btn.dataset.floor));
+});
+
+document.getElementById('addBtn').addEventListener('click', spawnRandomPassenger);
+
+document.getElementById('openBtn').addEventListener('click', () => {
+  if (ele.phase !== 'idle') return;
+  const nearest = Math.round(ele.pos);
+  if (Math.abs(ele.pos - nearest) < 0.001) {
+    ele.pos = nearest;
+    openDoor(nearest);
+  }
+});
+
+document.getElementById('closeBtn').addEventListener('click', () => {
+  if (ele.phase === 'open') ele.holdTimer = 0;
+});
+
+log('系统就绪 · 两层电梯');
+log('点击外呼生成乘客 · 随机乘客按钮可快速添加');
+</script>
+</body>
+</html>
